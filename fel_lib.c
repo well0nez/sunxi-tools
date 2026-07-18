@@ -31,7 +31,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define USB_TIMEOUT	10000 /* 10 seconds */
+#ifndef min
+#define min(a,b)            (((a) < (b)) ? (a) : (b))
+#endif
+
+#define USB_TIMEOUT	20000 /* 20 seconds */
 
 static bool fel_lib_initialized = false;
 
@@ -101,14 +105,31 @@ static void usb_bulk_send(libusb_device_handle *usb, int ep, const void *data,
 static void usb_bulk_recv(libusb_device_handle *usb, int ep, void *data,
 			  int length)
 {
+	unsigned char temp_buffer[64];
+	unsigned char *recv_ptr = data;
+	int buffer_size = length;
 	int rc, recv;
+
+	/* Some H713 status reads return more data than requested. */
+	if (length <= 8) {
+		recv_ptr = temp_buffer;
+		buffer_size = sizeof(temp_buffer);
+	}
+
 	while (length > 0) {
-		rc = libusb_bulk_transfer(usb, ep, data, length,
+		rc = libusb_bulk_transfer(usb, ep, recv_ptr, buffer_size,
 					  &recv, USB_TIMEOUT);
 		if (rc != 0)
 			usb_error(rc, "usb_bulk_recv()", 2);
-		length -= recv;
-		data += recv;
+
+		/* If using temporary buffer, copy only requested bytes */
+		if (recv_ptr == temp_buffer) {
+			memcpy(data, temp_buffer, min(recv, length));
+			length = 0; /* Exit after one read */
+		} else {
+			length -= recv;
+			data += recv;
+		}
 	}
 }
 
@@ -155,7 +176,7 @@ static void aw_read_usb_response(feldev_handle *dev)
 	char buf[13];
 	usb_bulk_recv(dev->usb->handle, dev->usb->endpoint_in,
 		      buf, sizeof(buf));
-	assert(strcmp(buf, "AWUS") == 0);
+	assert(strncmp(buf, "AWUS", 4) == 0);
 }
 
 static void aw_usb_write(feldev_handle *dev, const void *data, size_t len,
