@@ -157,6 +157,21 @@ sram_swap_buffers a133_sram_swap_buffers[] = {
 };
 
 /*
+ * H713 uses SRAM A2-based memory layout; BROM reports scratch at 0x121500.
+ * FEL stack pointers were observed at sp_irq=0x105400 and sp=0x120300.
+ * Offline boot0 analysis also points to a BSS range at 0x10b348-0x10b944.
+ * Writing immediately above sp=0x120300 wedges FEL. The upper stack-adjacent
+ * range is only protected up to the last hardware-proven slice.
+ */
+sram_swap_buffers h713_sram_swap_buffers[] = {
+	{ .buf1 = 0x105000, .buf2 = 0x122200, .size = 0x0400 },
+	{ .buf1 = 0x10b300, .buf2 = 0x121900, .size = 0x0700 },
+	{ .buf1 = 0x11ef00, .buf2 = 0x122600, .size = 0x1400 },
+	{ .buf1 = 0x120300, .buf2 = 0x122000, .size = 0x0200 },
+	{ .size = 0 }  /* End of the table */
+};
+
+/*
  * R329 has no SRAM A1, but a huge SRAM A2 at 0x100000. SPL and BROM uses
  * this SRAM A2's first part like how other SoCs use SRAM A1. The sp and
  * sp_irq values checked with thunk are 0x13c2c8 and 0x101400, which looks
@@ -642,6 +657,21 @@ soc_info_t soc_info_table[] = {
 		.rvbar_reg    = 0x08100040,
 		.needs_smc_workaround_if_zero_word_at_addr = 0x100004,
 		.watchdog     = &wd_h6_compat,
+	},{
+		.soc_id       = 0x1860, /* Allwinner H713 (H616 variant) */
+		.name         = "H713",
+		.spl_addr     = 0x104000,  /* H713 SRAM A2 + 0x4000, from boot0.bin header */
+		.scratch_addr = 0x121500,  /* FEL scratchpad reported by BROM */
+		.thunk_addr   = 0x123a00, .thunk_size = 0x200,  /* Thunk near stack */
+		.swap_buffers = h713_sram_swap_buffers,  /* Changed from h616_sram_swap_buffers */
+		.sram_size    = 128 * 1024,
+		.sid_base     = 0x03006000,
+		.sid_offset   = 0x200,
+		.sid_sections = generic_2k_sid_maps,
+		.rvbar_reg    = 0x09010040,
+		.rvbar_reg_alt= 0x08100040,
+		.ver_reg      = 0x03000024,
+		.icache_fix   = true,
 	},{
 		.swap_buffers = NULL /* End of the table */
 	}
