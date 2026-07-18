@@ -86,19 +86,36 @@ static void usb_bulk_send(libusb_device_handle *usb, int ep, const void *data,
 	 */
 	size_t max_chunk = progress ? 128 * 1024 : AW_USB_MAX_BULK_SEND;
 
+	/*
+	 * Some FEL BROMs (observed on the H713/sun50iw12) stall part-way
+	 * through a large contiguous bulk transfer, wedging FEL and yielding
+	 * ETIMEDOUT. Empirically a 32 KiB SPL uploads reliably while 64 KiB
+	 * does not, so cap the per-request size well below that and retry a
+	 * stalled request, advancing by whatever partial data got through.
+	 */
+	if (max_chunk > 16 * 1024)
+		max_chunk = 16 * 1024;
+
 	size_t chunk;
-	int rc, sent;
+	int rc, sent, timeouts = 0;
 	while (length > 0) {
 		chunk = length < max_chunk ? length : max_chunk;
+		sent = 0;
 		rc = libusb_bulk_transfer(usb, ep, (void *)data, chunk,
 					  &sent, USB_TIMEOUT);
-		if (rc != 0)
-			usb_error(rc, "usb_bulk_send()", 2);
 		length -= sent;
 		data += sent;
-
-		if (progress)
+		if (progress && sent)
 			progress_update(sent); /* notification after each chunk */
+
+		if (rc == LIBUSB_ERROR_TIMEOUT) {
+			if (sent == 0 || ++timeouts > 2)
+				usb_error(rc, "usb_bulk_send()", 2);
+			continue;	/* retry the remainder if partial progress */
+		}
+		if (rc != 0)
+			usb_error(rc, "usb_bulk_send()", 2);
+		timeouts = 0;
 	}
 }
 
