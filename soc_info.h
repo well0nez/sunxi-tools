@@ -135,6 +135,16 @@ typedef struct {
 	bool               icache_fix;
 	/* Use SMC workaround (enter secure mode) if can't read from this address */
 	uint32_t           needs_smc_workaround_if_zero_word_at_addr;
+	/*
+	 * Address of the FEL trap door that the SPL leaves behind, or 0 if the
+	 * SoC does not need one. Some SoCs (H713) cannot restore an AArch32
+	 * EL3 when the AArch64 SPL returns into FEL, which puts the BROM's FEL
+	 * loop at EL1 and makes the AArch32 RMR register unreachable from
+	 * there. Their SPL instead installs a minimal EL3 vector table at this
+	 * address, whose "synchronous from a lower EL in AArch32" slot jumps to
+	 * an address deposited at +0x700. An "smc #0" then re-enters AArch64.
+	 */
+	uint32_t           fel_door_addr;
 	uint32_t           sram_size;	/* Usable contiguous SRAM at spl_addr */
 	sram_swap_buffers *swap_buffers;
 } soc_info_t;

@@ -671,6 +671,7 @@ soc_info_t soc_info_table[] = {
 		.rvbar_reg    = 0x09010040,
 		.rvbar_reg_alt= 0x08100040,
 		.ver_reg      = 0x03000024,
+		.fel_door_addr= 0x48000000,  /* EL3 trap door installed by the SPL */
 		.icache_fix   = true,
 	},{
 		.swap_buffers = NULL /* End of the table */

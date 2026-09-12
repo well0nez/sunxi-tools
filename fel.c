@@ -1092,9 +1092,65 @@ void pass_fel_information(feldev_handle *dev,
  * The code was inspired by
  * https://github.com/apritzel/u-boot/commit/fda6bd1bf285c44f30ea15c7e6231bf53c31d4a8
  */
+/*
+ * Enter AArch64 through the trap door that the SPL left behind.
+ *
+ * On some SoCs the AArch64 SPL cannot hand EL3 back to AArch32 on its way
+ * into FEL, so the BROM's FEL loop resumes at EL1 - where the AArch32 RMR
+ * register is not accessible and the sequence in aw_rmr_request() below would
+ * wedge the core instead of booting it. Their SPL instead installs a minimal
+ * EL3 vector table, and because EL3 stays in AArch64 an "smc #0" from the FEL
+ * loop is a way back up into it. Deposit the entry point in the door's mailbox
+ * and knock.
+ *
+ * Returns false (and explains itself) when no door is there to knock on.
+ */
+static bool aw_fel_door_request(feldev_handle *dev, uint32_t entry_point)
+{
+	uint32_t door = dev->soc_info->fel_door_addr;
+	uint32_t stub;
+	/* 64-bit mailbox, little endian, as read by the door's "ldr x0" */
+	uint32_t mailbox[2] = { htole32(entry_point), 0 };
+	uint32_t smc_code[] = {
+		htole32(0xe1600070), /* smc	#0	*/
+		htole32(0xe12fff1e), /* bx	lr	*/
+	};
+
+	/* First instruction of the door's handler: "ldr x0, [pc, #0x100]" */
+	aw_fel_read(dev, door + 0x600, &stub, sizeof(stub));
+	if (stub != htole32(0x58000800)) {
+		pr_error("ERROR: no FEL trap door found at 0x%08X.\n"
+			 "Your U-Boot SPL is too old for this SoC (%s): it has "
+			 "to install one\nbefore returning into FEL, otherwise "
+			 "there is no way back into AArch64.\n",
+			 door, dev->soc_name);
+		return false;
+	}
+
+	aw_fel_write(dev, mailbox, door + 0x700, sizeof(mailbox));
+	aw_fel_write(dev, smc_code, door + 0x800, sizeof(smc_code));
+
+	pr_info("Store entry point 0x%08X in the FEL trap door at 0x%08X, "
+		"and enter AArch64 via smc...", entry_point, door);
+	aw_fel_execute(dev, door + 0x800);
+	pr_info(" done.\n");
+	return true;
+}
+
 void aw_rmr_request(feldev_handle *dev, uint32_t entry_point, bool aarch64)
 {
 	soc_info_t *soc_info = dev->soc_info;
+
+	/*
+	 * Where a trap door is the only way into AArch64, take it - and do not
+	 * fall back to the RMR sequence below if it is missing, since that
+	 * would hang the board rather than report the problem.
+	 */
+	if (aarch64 && soc_info->fel_door_addr) {
+		aw_fel_door_request(dev, entry_point);
+		return;
+	}
+
 	if (!soc_info->rvbar_reg) {
 		pr_error("ERROR: Can't issue RMR request!\n"
 			 "RVBAR is not supported or unknown for your SoC (%s).\n",
